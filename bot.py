@@ -215,9 +215,9 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     
     if image_id:
-        await update.channel_post.edit_text(
-            text=text,
-            photo=image_id
+        from telegram import InputMediaPhoto
+        await update.channel_post.edit_media(
+            media=InputMediaPhoto(media=image_id, caption=text)
         )
 
 async def handle_forwarded(update: Update, context: ContextTypes.DEFAULT_TYPE):
