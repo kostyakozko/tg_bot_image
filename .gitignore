@@ -1,0 +1,5 @@
+config.db
+token.txt
+__pycache__/
+*.pyc
+.env
