@@ -221,12 +221,25 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
 
 async def handle_forwarded(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.forward_from_chat and update.message.forward_from_chat.type == "channel":
-        channel_id = update.message.forward_from_chat.id
-        await update.message.reply_text(
+    msg = update.message
+    if not msg:
+        return
+    
+    # Check if forwarded from channel
+    if msg.forward_from_chat and msg.forward_from_chat.type == "channel":
+        channel_id = msg.forward_from_chat.id
+        await msg.reply_text(
             f"ID каналу: {channel_id}\n\n"
             f"Використайте: /set_channel {channel_id}"
         )
+    elif msg.forward_origin:
+        # Handle newer Telegram API
+        if hasattr(msg.forward_origin, 'chat') and msg.forward_origin.chat.type == "channel":
+            channel_id = msg.forward_origin.chat.id
+            await msg.reply_text(
+                f"ID каналу: {channel_id}\n\n"
+                f"Використайте: /set_channel {channel_id}"
+            )
 
 def main():
     init_db()
