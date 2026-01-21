@@ -225,17 +225,22 @@ async def handle_forwarded(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not msg:
         return
     
-    # Check if forwarded from channel
-    if msg.forward_from_chat and msg.forward_from_chat.type == "channel":
-        channel_id = msg.forward_from_chat.id
-        await msg.reply_text(
-            f"ID каналу: {channel_id}\n\n"
-            f"Використайте: /set_channel {channel_id}"
-        )
-    elif msg.forward_origin:
-        # Handle newer Telegram API
-        if hasattr(msg.forward_origin, 'chat') and msg.forward_origin.chat.type == "channel":
-            channel_id = msg.forward_origin.chat.id
+    # Check if forwarded from channel using forward_origin
+    if hasattr(msg, 'forward_origin') and msg.forward_origin:
+        origin = msg.forward_origin
+        # Check if it's a channel forward
+        if hasattr(origin, 'chat') and origin.chat and origin.chat.type == "channel":
+            channel_id = origin.chat.id
+            await msg.reply_text(
+                f"ID каналу: {channel_id}\n\n"
+                f"Використайте: /set_channel {channel_id}"
+            )
+            return
+    
+    # Fallback: check old API
+    if hasattr(msg, 'forward_from_chat') and msg.forward_from_chat:
+        if msg.forward_from_chat.type == "channel":
+            channel_id = msg.forward_from_chat.id
             await msg.reply_text(
                 f"ID каналу: {channel_id}\n\n"
                 f"Використайте: /set_channel {channel_id}"
