@@ -1,6 +1,28 @@
 # Deployment Guide
 
-## Railway.app (Recommended)
+# Render.com (Recommended - Free Forever)
+
+1. Go to https://render.com and sign up with GitHub
+2. Click "New +" → "Web Service"
+3. Connect your GitHub account and select `kostyakozko/tg_bot_image`
+4. Settings:
+   - **Name**: tg-bot-image (or whatever you want)
+   - **Environment**: Python 3
+   - **Build Command**: `pip install -r requirements.txt`
+   - **Start Command**: `python bot.py`
+   - **Instance Type**: Free
+5. Click "Advanced" and add environment variable:
+   - Key: `BOT_TOKEN`
+   - Value: Your bot token from @BotFather
+6. Click "Create Web Service"
+
+Render provides:
+- 750 hours/month free (enough for 24/7)
+- Persistent disk (database survives deployments)
+- Automatic deployments on git push
+- Actually free forever (not a trial)
+
+## Railway.app
 
 1. Create account at [railway.app](https://railway.app)
 2. Click "New Project" → "Deploy from GitHub repo"
@@ -8,24 +30,12 @@
 4. Add environment variable:
    - Key: `BOT_TOKEN`
    - Value: Your bot token from @BotFather
-5. Deploy automatically starts
+5. Add a Volume for persistence:
+   - Settings → Volumes → New Volume
+   - Mount path: `/app/data`
+6. Deploy automatically starts
 
-Railway provides:
-- 500 hours/month free (enough for 24/7)
-- Automatic deployments on git push
-- Built-in SQLite persistence
-
-## Render.com (Alternative)
-
-1. Create account at [render.com](https://render.com)
-2. Click "New +" → "Web Service"
-3. Connect repository
-4. Settings:
-   - Environment: Python 3
-   - Build Command: `pip install -r requirements.txt`
-   - Start Command: `python bot.py`
-5. Add environment variable `BOT_TOKEN`
-6. Create Web Service (free tier)
+Note: Railway free tier is only 30 days trial, then paid (~$5-10/month).
 
 ## Local Development
 

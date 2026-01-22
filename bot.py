@@ -1,9 +1,13 @@
 import re
 import sqlite3
+import os
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-DB_FILE = "config.db"
+# Use persistent directory for database
+DB_DIR = os.getenv("DATA_DIR", "/opt/render/project/src/data")
+os.makedirs(DB_DIR, exist_ok=True)
+DB_FILE = os.path.join(DB_DIR, "config.db")
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
