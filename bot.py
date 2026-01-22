@@ -21,6 +21,12 @@ def init_db():
             channel_title TEXT
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_sessions (
+            user_id INTEGER PRIMARY KEY,
+            active_channel_id INTEGER
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -46,6 +52,20 @@ def update_channel_info(channel_id, username=None, title=None):
                  (username, title, channel_id))
     conn.commit()
     conn.close()
+
+def set_user_active_channel(user_id, channel_id):
+    conn = sqlite3.connect(DB_FILE)
+    conn.execute("INSERT OR REPLACE INTO user_sessions (user_id, active_channel_id) VALUES (?, ?)", 
+                 (user_id, channel_id))
+    conn.commit()
+    conn.close()
+
+def get_user_active_channel(user_id):
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.execute("SELECT active_channel_id FROM user_sessions WHERE user_id = ?", (user_id,))
+    row = cur.fetchone()
+    conn.close()
+    return row[0] if row else None
 
 def update_channel_image(channel_id, color, file_id):
     conn = sqlite3.connect(DB_FILE)
@@ -101,7 +121,8 @@ async def set_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if config["owner_id"] is None:
             set_channel_owner(channel_id, user_id)
         
-        context.user_data["active_channel"] = channel_id
+        # Save to database instead of context
+        set_user_active_channel(user_id, channel_id)
         
         # Build channel display name
         channel_display = f"{channel_id}"
@@ -115,12 +136,12 @@ async def set_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Невірний ID каналу")
 
 async def set_red(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if "active_channel" not in context.user_data:
+    user_id = update.message.from_user.id
+    channel_id = get_user_active_channel(user_id)
+    
+    if not channel_id:
         await update.message.reply_text("❌ Спочатку встановіть канал: /set_channel <channel_id>")
         return
-    
-    channel_id = context.user_data["active_channel"]
-    user_id = update.message.from_user.id
     
     if not is_owner(channel_id, user_id):
         await update.message.reply_text("❌ Ви не є власником цього каналу")
@@ -130,12 +151,12 @@ async def set_red(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["waiting_for"] = "red"
 
 async def set_green(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if "active_channel" not in context.user_data:
+    user_id = update.message.from_user.id
+    channel_id = get_user_active_channel(user_id)
+    
+    if not channel_id:
         await update.message.reply_text("❌ Спочатку встановіть канал: /set_channel <channel_id>")
         return
-    
-    channel_id = context.user_data["active_channel"]
-    user_id = update.message.from_user.id
     
     if not is_owner(channel_id, user_id):
         await update.message.reply_text("❌ Ви не є власником цього каналу")
@@ -145,12 +166,12 @@ async def set_green(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["waiting_for"] = "green"
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if "active_channel" not in context.user_data:
+    user_id = update.message.from_user.id
+    channel_id = get_user_active_channel(user_id)
+    
+    if not channel_id:
         await update.message.reply_text("❌ Спочатку встановіть канал: /set_channel <channel_id>")
         return
-    
-    channel_id = context.user_data["active_channel"]
-    user_id = update.message.from_user.id
     
     if not is_owner(channel_id, user_id):
         await update.message.reply_text("❌ Ви не є власником цього каналу")
@@ -173,7 +194,10 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def transfer(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if "active_channel" not in context.user_data:
+    user_id = update.message.from_user.id
+    channel_id = get_user_active_channel(user_id)
+    
+    if not channel_id:
         await update.message.reply_text("❌ Спочатку встановіть канал: /set_channel <channel_id>")
         return
     
@@ -183,8 +207,6 @@ async def transfer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         new_owner_id = int(context.args[0])
-        channel_id = context.user_data["active_channel"]
-        user_id = update.message.from_user.id
         
         if not is_owner(channel_id, user_id):
             await update.message.reply_text("❌ Ви не є власником цього каналу")
@@ -197,19 +219,18 @@ async def transfer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Невірний ID користувача")
 
 async def remove_channel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if "active_channel" not in context.user_data:
+    user_id = update.message.from_user.id
+    channel_id = get_user_active_channel(user_id)
+    
+    if not channel_id:
         await update.message.reply_text("❌ Спочатку встановіть канал: /set_channel <channel_id>")
         return
-    
-    channel_id = context.user_data["active_channel"]
-    user_id = update.message.from_user.id
     
     if not is_owner(channel_id, user_id):
         await update.message.reply_text("❌ Ви не є власником цього каналу")
         return
     
     remove_channel(channel_id)
-    context.user_data.pop("active_channel")
     
     await update.message.reply_text(f"✅ Налаштування каналу {channel_id} видалено")
 
@@ -218,11 +239,17 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     waiting_for = context.user_data.get("waiting_for")
-    if not waiting_for or "active_channel" not in context.user_data:
+    if not waiting_for:
+        return
+    
+    user_id = update.message.from_user.id
+    channel_id = get_user_active_channel(user_id)
+    
+    if not channel_id:
+        await update.message.reply_text("❌ Спочатку встановіть канал: /set_channel <channel_id>")
         return
     
     photo = update.message.photo[-1]
-    channel_id = context.user_data["active_channel"]
     update_channel_image(channel_id, waiting_for, photo.file_id)
     
     await update.message.reply_text(f"✅ Зображення для {'🔴' if waiting_for == 'red' else '🟢'} збережено")
