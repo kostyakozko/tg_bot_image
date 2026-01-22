@@ -1,5 +1,7 @@
 config.db
+data/
 token.txt
 __pycache__/
 *.pyc
 .env
+ORACLE_COMMANDS_PRIVATE.md

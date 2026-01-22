@@ -16,7 +16,9 @@ def init_db():
             channel_id INTEGER PRIMARY KEY,
             owner_id INTEGER,
             red_image TEXT,
-            green_image TEXT
+            green_image TEXT,
+            channel_username TEXT,
+            channel_title TEXT
         )
     """)
     conn.commit()
@@ -24,16 +26,24 @@ def init_db():
 
 def get_channel_config(channel_id):
     conn = sqlite3.connect(DB_FILE)
-    cur = conn.execute("SELECT owner_id, red_image, green_image FROM channels WHERE channel_id = ?", (channel_id,))
+    cur = conn.execute("SELECT owner_id, red_image, green_image, channel_username, channel_title FROM channels WHERE channel_id = ?", (channel_id,))
     row = cur.fetchone()
     conn.close()
     if row:
-        return {"owner_id": row[0], "red_image": row[1], "green_image": row[2]}
-    return {"owner_id": None, "red_image": None, "green_image": None}
+        return {"owner_id": row[0], "red_image": row[1], "green_image": row[2], "channel_username": row[3], "channel_title": row[4]}
+    return {"owner_id": None, "red_image": None, "green_image": None, "channel_username": None, "channel_title": None}
 
-def set_channel_owner(channel_id, owner_id):
+def set_channel_owner(channel_id, owner_id, username=None, title=None):
     conn = sqlite3.connect(DB_FILE)
-    conn.execute("INSERT OR IGNORE INTO channels (channel_id, owner_id) VALUES (?, ?)", (channel_id, owner_id))
+    conn.execute("INSERT OR IGNORE INTO channels (channel_id, owner_id, channel_username, channel_title) VALUES (?, ?, ?, ?)", 
+                 (channel_id, owner_id, username, title))
+    conn.commit()
+    conn.close()
+
+def update_channel_info(channel_id, username=None, title=None):
+    conn = sqlite3.connect(DB_FILE)
+    conn.execute("UPDATE channels SET channel_username = ?, channel_title = ? WHERE channel_id = ?", 
+                 (username, title, channel_id))
     conn.commit()
     conn.close()
 
@@ -92,7 +102,15 @@ async def set_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             set_channel_owner(channel_id, user_id)
         
         context.user_data["active_channel"] = channel_id
-        await update.message.reply_text(f"✅ Активний канал: {channel_id}")
+        
+        # Build channel display name
+        channel_display = f"{channel_id}"
+        if config['channel_username']:
+            channel_display = f"@{config['channel_username']} ({channel_id})"
+        elif config['channel_title']:
+            channel_display = f"{config['channel_title']} ({channel_id})"
+        
+        await update.message.reply_text(f"✅ Активний канал: {channel_display}")
     except ValueError:
         await update.message.reply_text("❌ Невірний ID каналу")
 
@@ -140,8 +158,15 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     config = get_channel_config(channel_id)
     
+    # Build channel display name
+    channel_display = f"{channel_id}"
+    if config['channel_username']:
+        channel_display = f"@{config['channel_username']} ({channel_id})"
+    elif config['channel_title']:
+        channel_display = f"{config['channel_title']} ({channel_id})"
+    
     await update.message.reply_text(
-        f"Канал: {channel_id}\n"
+        f"Канал: {channel_display}\n"
         f"Власник: {config['owner_id']}\n"
         f"🔴 зображення: {'✅' if config['red_image'] else '❌'}\n"
         f"🟢 зображення: {'✅' if config['green_image'] else '❌'}"
@@ -211,6 +236,14 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
     channel_id = update.channel_post.chat_id
     config = get_channel_config(channel_id)
     
+    # Update channel info if we have it
+    if update.channel_post.chat:
+        chat = update.channel_post.chat
+        username = chat.username if hasattr(chat, 'username') else None
+        title = chat.title if hasattr(chat, 'title') else None
+        if username or title:
+            update_channel_info(channel_id, username, title)
+    
     if re.search(r"🔴.*світло зникло", text, re.IGNORECASE):
         image_id = config.get("red_image")
     elif re.search(r"🟢.*світло з'явилося", text, re.IGNORECASE):
@@ -235,8 +268,18 @@ async def handle_forwarded(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Check if it's a channel forward
         if hasattr(origin, 'chat') and origin.chat and origin.chat.type == "channel":
             channel_id = origin.chat.id
+            channel_username = origin.chat.username if hasattr(origin.chat, 'username') else None
+            channel_title = origin.chat.title if hasattr(origin.chat, 'title') else None
+            
+            # Build display message
+            channel_display = f"{channel_id}"
+            if channel_username:
+                channel_display = f"@{channel_username} ({channel_id})"
+            elif channel_title:
+                channel_display = f"{channel_title} ({channel_id})"
+            
             await msg.reply_text(
-                f"ID каналу: {channel_id}\n\n"
+                f"ID каналу: {channel_display}\n\n"
                 f"Використайте: /set_channel {channel_id}"
             )
             return
