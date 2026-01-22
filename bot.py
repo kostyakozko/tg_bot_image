@@ -4,8 +4,8 @@ import os
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# Use data directory in current folder
-DB_DIR = os.path.join(os.path.dirname(__file__), "data")
+# Use data directory outside git repo
+DB_DIR = os.path.expanduser("~/telegram_bot_data")
 os.makedirs(DB_DIR, exist_ok=True)
 DB_FILE = os.path.join(DB_DIR, "config.db")
 
