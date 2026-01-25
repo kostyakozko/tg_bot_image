@@ -97,8 +97,14 @@ For setting up command menu in @BotFather:
 ```
 start - Show available commands
 set_channel - Set which channel to configure
-set_red - Set image for 🔴 (power off)
-set_green - Set image for 🟢 (power on)
+set_red - Replace all images for 🔴 (power off)
+set_green - Replace all images for 🟢 (power on)
+add_red - Add image to 🔴 collection
+add_green - Add image to 🟢 collection
+list_red - List all 🔴 images
+list_green - List all 🟢 images
+remove_red - Remove 🔴 image by number
+remove_green - Remove 🟢 image by number
 status - Check current configuration
 transfer - Transfer ownership to another user
 remove_channel - Delete channel configuration
