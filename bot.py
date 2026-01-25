@@ -271,11 +271,11 @@ async def list_red(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🔴 Немає зображень")
         return
     
-    message = f"🔴 Зображень: {len(config['red_images'])}\n\n"
-    for i in range(len(config['red_images'])):
-        message += f"{i+1}. Зображення #{i+1}\n"
-    message += "\nВикористовуйте /remove_red <номер> для видалення"
-    await update.message.reply_text(message)
+    await update.message.reply_text(f"🔴 Зображень: {len(config['red_images'])}\n\nВикористовуйте /remove_red <номер> для видалення")
+    
+    # Send each image with its number
+    for i, image_id in enumerate(config['red_images'], 1):
+        await update.message.reply_photo(photo=image_id, caption=f"#{i}")
 
 async def list_green(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -294,11 +294,11 @@ async def list_green(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🟢 Немає зображень")
         return
     
-    message = f"🟢 Зображень: {len(config['green_images'])}\n\n"
-    for i in range(len(config['green_images'])):
-        message += f"{i+1}. Зображення #{i+1}\n"
-    message += "\nВикористовуйте /remove_green <номер> для видалення"
-    await update.message.reply_text(message)
+    await update.message.reply_text(f"🟢 Зображень: {len(config['green_images'])}\n\nВикористовуйте /remove_green <номер> для видалення")
+    
+    # Send each image with its number
+    for i, image_id in enumerate(config['green_images'], 1):
+        await update.message.reply_photo(photo=image_id, caption=f"#{i}")
 
 async def remove_red(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
