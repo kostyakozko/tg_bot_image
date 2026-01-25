@@ -1,6 +1,8 @@
 import re
 import sqlite3
 import os
+import json
+import random
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -36,8 +38,17 @@ def get_channel_config(channel_id):
     row = cur.fetchone()
     conn.close()
     if row:
-        return {"owner_id": row[0], "red_image": row[1], "green_image": row[2], "channel_username": row[3], "channel_title": row[4]}
-    return {"owner_id": None, "red_image": None, "green_image": None, "channel_username": None, "channel_title": None}
+        # Parse JSON arrays for images, fallback to single image for backward compatibility
+        red_images = json.loads(row[1]) if row[1] and row[1].startswith('[') else ([row[1]] if row[1] else [])
+        green_images = json.loads(row[2]) if row[2] and row[2].startswith('[') else ([row[2]] if row[2] else [])
+        return {
+            "owner_id": row[0], 
+            "red_images": red_images, 
+            "green_images": green_images, 
+            "channel_username": row[3], 
+            "channel_title": row[4]
+        }
+    return {"owner_id": None, "red_images": [], "green_images": [], "channel_username": None, "channel_title": None}
 
 def set_channel_owner(channel_id, owner_id, username=None, title=None):
     conn = sqlite3.connect(DB_FILE)
@@ -68,11 +79,53 @@ def get_user_active_channel(user_id):
     return row[0] if row else None
 
 def update_channel_image(channel_id, color, file_id):
+    """Replace all images with a single one (for /set_red and /set_green)"""
     conn = sqlite3.connect(DB_FILE)
+    images_json = json.dumps([file_id])
     if color == "red":
-        conn.execute("UPDATE channels SET red_image = ? WHERE channel_id = ?", (file_id, channel_id))
+        conn.execute("UPDATE channels SET red_image = ? WHERE channel_id = ?", (images_json, channel_id))
     else:
-        conn.execute("UPDATE channels SET green_image = ? WHERE channel_id = ?", (file_id, channel_id))
+        conn.execute("UPDATE channels SET green_image = ? WHERE channel_id = ?", (images_json, channel_id))
+    conn.commit()
+    conn.close()
+
+def add_channel_image(channel_id, color, file_id):
+    """Add an image to existing collection"""
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.execute("SELECT red_image, green_image FROM channels WHERE channel_id = ?", (channel_id,))
+    row = cur.fetchone()
+    
+    if row:
+        if color == "red":
+            current = json.loads(row[0]) if row[0] and row[0].startswith('[') else ([row[0]] if row[0] else [])
+            current.append(file_id)
+            conn.execute("UPDATE channels SET red_image = ? WHERE channel_id = ?", (json.dumps(current), channel_id))
+        else:
+            current = json.loads(row[1]) if row[1] and row[1].startswith('[') else ([row[1]] if row[1] else [])
+            current.append(file_id)
+            conn.execute("UPDATE channels SET green_image = ? WHERE channel_id = ?", (json.dumps(current), channel_id))
+    
+    conn.commit()
+    conn.close()
+
+def remove_channel_image(channel_id, color, index):
+    """Remove an image by index"""
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.execute("SELECT red_image, green_image FROM channels WHERE channel_id = ?", (channel_id,))
+    row = cur.fetchone()
+    
+    if row:
+        if color == "red":
+            current = json.loads(row[0]) if row[0] and row[0].startswith('[') else ([row[0]] if row[0] else [])
+            if 0 <= index < len(current):
+                current.pop(index)
+                conn.execute("UPDATE channels SET red_image = ? WHERE channel_id = ?", (json.dumps(current), channel_id))
+        else:
+            current = json.loads(row[1]) if row[1] and row[1].startswith('[') else ([row[1]] if row[1] else [])
+            if 0 <= index < len(current):
+                current.pop(index)
+                conn.execute("UPDATE channels SET green_image = ? WHERE channel_id = ?", (json.dumps(current), channel_id))
+    
     conn.commit()
     conn.close()
 
@@ -96,8 +149,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Команди:\n"
         "/set_channel <channel_id> - встановити канал для налаштування\n"
-        "/set_red - встановити зображення для 🔴\n"
-        "/set_green - встановити зображення для 🟢\n"
+        "/set_red - замінити всі зображення для 🔴\n"
+        "/set_green - замінити всі зображення для 🟢\n"
+        "/add_red - додати зображення до 🔴\n"
+        "/add_green - додати зображення до 🟢\n"
+        "/list_red - список зображень 🔴\n"
+        "/list_green - список зображень 🟢\n"
+        "/remove_red <номер> - видалити зображення 🔴\n"
+        "/remove_green <номер> - видалити зображення 🟢\n"
         "/status - перевірити налаштування\n"
         "/transfer <user_id> - передати права власності\n"
         "/remove_channel - видалити налаштування каналу\n\n"
@@ -147,8 +206,8 @@ async def set_red(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Ви не є власником цього каналу")
         return
     
-    await update.message.reply_text("Надішліть фото для 🔴 (світло зникло)")
-    context.user_data["waiting_for"] = "red"
+    await update.message.reply_text("Надішліть фото для 🔴 (замінить всі існуючі)")
+    context.user_data["waiting_for"] = "set_red"
 
 async def set_green(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -162,8 +221,131 @@ async def set_green(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Ви не є власником цього каналу")
         return
     
-    await update.message.reply_text("Надішліть фото для 🟢 (світло з'явилося)")
-    context.user_data["waiting_for"] = "green"
+    await update.message.reply_text("Надішліть фото для 🟢 (замінить всі існуючі)")
+    context.user_data["waiting_for"] = "set_green"
+
+async def add_red(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    channel_id = get_user_active_channel(user_id)
+    
+    if not channel_id:
+        await update.message.reply_text("❌ Спочатку встановіть канал: /set_channel <channel_id>")
+        return
+    
+    if not is_owner(channel_id, user_id):
+        await update.message.reply_text("❌ Ви не є власником цього каналу")
+        return
+    
+    await update.message.reply_text("Надішліть фото для додавання до 🔴")
+    context.user_data["waiting_for"] = "add_red"
+
+async def add_green(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    channel_id = get_user_active_channel(user_id)
+    
+    if not channel_id:
+        await update.message.reply_text("❌ Спочатку встановіть канал: /set_channel <channel_id>")
+        return
+    
+    if not is_owner(channel_id, user_id):
+        await update.message.reply_text("❌ Ви не є власником цього каналу")
+        return
+    
+    await update.message.reply_text("Надішліть фото для додавання до 🟢")
+    context.user_data["waiting_for"] = "add_green"
+
+async def list_red(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    channel_id = get_user_active_channel(user_id)
+    
+    if not channel_id:
+        await update.message.reply_text("❌ Спочатку встановіть канал: /set_channel <channel_id>")
+        return
+    
+    if not is_owner(channel_id, user_id):
+        await update.message.reply_text("❌ Ви не є власником цього каналу")
+        return
+    
+    config = get_channel_config(channel_id)
+    if not config['red_images']:
+        await update.message.reply_text("🔴 Немає зображень")
+        return
+    
+    message = f"🔴 Зображень: {len(config['red_images'])}\n\n"
+    for i in range(len(config['red_images'])):
+        message += f"{i+1}. Зображення #{i+1}\n"
+    message += "\nВикористовуйте /remove_red <номер> для видалення"
+    await update.message.reply_text(message)
+
+async def list_green(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    channel_id = get_user_active_channel(user_id)
+    
+    if not channel_id:
+        await update.message.reply_text("❌ Спочатку встановіть канал: /set_channel <channel_id>")
+        return
+    
+    if not is_owner(channel_id, user_id):
+        await update.message.reply_text("❌ Ви не є власником цього каналу")
+        return
+    
+    config = get_channel_config(channel_id)
+    if not config['green_images']:
+        await update.message.reply_text("🟢 Немає зображень")
+        return
+    
+    message = f"🟢 Зображень: {len(config['green_images'])}\n\n"
+    for i in range(len(config['green_images'])):
+        message += f"{i+1}. Зображення #{i+1}\n"
+    message += "\nВикористовуйте /remove_green <номер> для видалення"
+    await update.message.reply_text(message)
+
+async def remove_red(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    channel_id = get_user_active_channel(user_id)
+    
+    if not channel_id:
+        await update.message.reply_text("❌ Спочатку встановіть канал: /set_channel <channel_id>")
+        return
+    
+    if not is_owner(channel_id, user_id):
+        await update.message.reply_text("❌ Ви не є власником цього каналу")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Використання: /remove_red <номер>")
+        return
+    
+    try:
+        index = int(context.args[0]) - 1
+        remove_channel_image(channel_id, "red", index)
+        await update.message.reply_text(f"✅ Видалено зображення #{index+1} з 🔴")
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Невірний номер зображення")
+
+async def remove_green(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    channel_id = get_user_active_channel(user_id)
+    
+    if not channel_id:
+        await update.message.reply_text("❌ Спочатку встановіть канал: /set_channel <channel_id>")
+        return
+    
+    if not is_owner(channel_id, user_id):
+        await update.message.reply_text("❌ Ви не є власником цього каналу")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Використання: /remove_green <номер>")
+        return
+    
+    try:
+        index = int(context.args[0]) - 1
+        remove_channel_image(channel_id, "green", index)
+        await update.message.reply_text(f"✅ Видалено зображення #{index+1} з 🟢")
+    except (ValueError, IndexError):
+        await update.message.reply_text("❌ Невірний номер зображення")
+
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -189,8 +371,8 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"Канал: {channel_display}\n"
         f"Власник: {config['owner_id']}\n"
-        f"🔴 зображення: {'✅' if config['red_image'] else '❌'}\n"
-        f"🟢 зображення: {'✅' if config['green_image'] else '❌'}"
+        f"🔴 зображень: {len(config['red_images'])}\n"
+        f"🟢 зображень: {len(config['green_images'])}"
     )
 
 async def transfer(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -250,9 +432,19 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     photo = update.message.photo[-1]
-    update_channel_image(channel_id, waiting_for, photo.file_id)
     
-    await update.message.reply_text(f"✅ Зображення для {'🔴' if waiting_for == 'red' else '🟢'} збережено")
+    # Handle different actions
+    if waiting_for in ["set_red", "set_green"]:
+        color = waiting_for.split("_")[1]
+        update_channel_image(channel_id, color, photo.file_id)
+        await update.message.reply_text(f"✅ Зображення для {'🔴' if color == 'red' else '🟢'} замінено")
+    elif waiting_for in ["add_red", "add_green"]:
+        color = waiting_for.split("_")[1]
+        add_channel_image(channel_id, color, photo.file_id)
+        config = get_channel_config(channel_id)
+        count = len(config['red_images']) if color == 'red' else len(config['green_images'])
+        await update.message.reply_text(f"✅ Додано зображення до {'🔴' if color == 'red' else '🟢'} (всього: {count})")
+    
     context.user_data.pop("waiting_for")
 
 async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -272,13 +464,15 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
             update_channel_info(channel_id, username, title)
     
     if re.search(r"🔴.*світло зникло", text, re.IGNORECASE):
-        image_id = config.get("red_image")
+        images = config.get("red_images", [])
     elif re.search(r"🟢.*світло з'явилося", text, re.IGNORECASE):
-        image_id = config.get("green_image")
+        images = config.get("green_images", [])
     else:
         return
     
-    if image_id:
+    if images:
+        # Randomly select one image
+        image_id = random.choice(images)
         from telegram import InputMediaPhoto
         await update.channel_post.edit_media(
             media=InputMediaPhoto(media=image_id, caption=text)
@@ -336,6 +530,12 @@ def main():
     app.add_handler(CommandHandler("set_channel", set_channel))
     app.add_handler(CommandHandler("set_red", set_red))
     app.add_handler(CommandHandler("set_green", set_green))
+    app.add_handler(CommandHandler("add_red", add_red))
+    app.add_handler(CommandHandler("add_green", add_green))
+    app.add_handler(CommandHandler("list_red", list_red))
+    app.add_handler(CommandHandler("list_green", list_green))
+    app.add_handler(CommandHandler("remove_red", remove_red))
+    app.add_handler(CommandHandler("remove_green", remove_green))
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("transfer", transfer))
     app.add_handler(CommandHandler("remove_channel", remove_channel_cmd))
