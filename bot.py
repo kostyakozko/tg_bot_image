@@ -20,7 +20,9 @@ def init_db():
             red_image TEXT,
             green_image TEXT,
             channel_username TEXT,
-            channel_title TEXT
+            channel_title TEXT,
+            text_on TEXT,
+            text_off TEXT
         )
     """)
     conn.execute("""
@@ -34,7 +36,7 @@ def init_db():
 
 def get_channel_config(channel_id):
     conn = sqlite3.connect(DB_FILE)
-    cur = conn.execute("SELECT owner_id, red_image, green_image, channel_username, channel_title FROM channels WHERE channel_id = ?", (channel_id,))
+    cur = conn.execute("SELECT owner_id, red_image, green_image, channel_username, channel_title, text_on, text_off FROM channels WHERE channel_id = ?", (channel_id,))
     row = cur.fetchone()
     conn.close()
     if row:
@@ -46,9 +48,11 @@ def get_channel_config(channel_id):
             "red_images": red_images, 
             "green_images": green_images, 
             "channel_username": row[3], 
-            "channel_title": row[4]
+            "channel_title": row[4],
+            "text_on": row[5] or "світло з'явилося",
+            "text_off": row[6] or "світло зникло"
         }
-    return {"owner_id": None, "red_images": [], "green_images": [], "channel_username": None, "channel_title": None}
+    return {"owner_id": None, "red_images": [], "green_images": [], "channel_username": None, "channel_title": None, "text_on": "світло з'явилося", "text_off": "світло зникло"}
 
 def set_channel_owner(channel_id, owner_id, username=None, title=None):
     conn = sqlite3.connect(DB_FILE)
@@ -157,6 +161,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/list_green - список зображень 🟢\n"
         "/remove_red <номер> - видалити зображення 🔴\n"
         "/remove_green <номер> - видалити зображення 🟢\n"
+        "/set_text_on <текст> - встановити текст для 🟢\n"
+        "/set_text_off <текст> - встановити текст для 🔴\n"
+        "/reset_text - скинути текст до стандартного\n"
         "/status - перевірити налаштування\n"
         "/transfer <user_id> - передати права власності\n"
         "/remove_channel - видалити налаштування каналу\n\n"
@@ -372,8 +379,87 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Канал: {channel_display}\n"
         f"Власник: {config['owner_id']}\n"
         f"🔴 зображень: {len(config['red_images'])}\n"
-        f"🟢 зображень: {len(config['green_images'])}"
+        f"🟢 зображень: {len(config['green_images'])}\n"
+        f"Текст для 🟢: {config['text_on']}\n"
+        f"Текст для 🔴: {config['text_off']}"
     )
+
+async def set_text_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    channel_id = get_user_active_channel(user_id)
+    
+    if not channel_id:
+        await update.message.reply_text("❌ Спочатку встановіть канал: /set_channel <channel_id>")
+        return
+    
+    if not is_owner(channel_id, user_id):
+        await update.message.reply_text("❌ Ви не є власником цього каналу")
+        return
+    
+    if not context.args:
+        await update.message.reply_text(
+            "Використання: /set_text_on <текст>\n\n"
+            "Приклад:\n"
+            "/set_text_on Електрохарчування відновлено"
+        )
+        return
+    
+    text = " ".join(context.args)
+    
+    conn = sqlite3.connect(DB_FILE)
+    conn.execute("UPDATE channels SET text_on = ? WHERE channel_id = ?", (text, channel_id))
+    conn.commit()
+    conn.close()
+    
+    await update.message.reply_text(f"✅ Текст для 🟢 встановлено: {text}")
+
+async def set_text_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    channel_id = get_user_active_channel(user_id)
+    
+    if not channel_id:
+        await update.message.reply_text("❌ Спочатку встановіть канал: /set_channel <channel_id>")
+        return
+    
+    if not is_owner(channel_id, user_id):
+        await update.message.reply_text("❌ Ви не є власником цього каналу")
+        return
+    
+    if not context.args:
+        await update.message.reply_text(
+            "Використання: /set_text_off <текст>\n\n"
+            "Приклад:\n"
+            "/set_text_off Електрохарчування відсутнє"
+        )
+        return
+    
+    text = " ".join(context.args)
+    
+    conn = sqlite3.connect(DB_FILE)
+    conn.execute("UPDATE channels SET text_off = ? WHERE channel_id = ?", (text, channel_id))
+    conn.commit()
+    conn.close()
+    
+    await update.message.reply_text(f"✅ Текст для 🔴 встановлено: {text}")
+
+async def reset_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    channel_id = get_user_active_channel(user_id)
+    
+    if not channel_id:
+        await update.message.reply_text("❌ Спочатку встановіть канал: /set_channel <channel_id>")
+        return
+    
+    if not is_owner(channel_id, user_id):
+        await update.message.reply_text("❌ Ви не є власником цього каналу")
+        return
+    
+    conn = sqlite3.connect(DB_FILE)
+    conn.execute("UPDATE channels SET text_on = NULL, text_off = NULL WHERE channel_id = ?", (channel_id,))
+    conn.commit()
+    conn.close()
+    
+    await update.message.reply_text("✅ Текст скинуто до стандартного (світло з'явилося / світло зникло)")
 
 async def transfer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -463,9 +549,13 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
         if username or title:
             update_channel_info(channel_id, username, title)
     
-    if re.search(r"🔴.*світло зникло", text, re.IGNORECASE):
+    # Use custom text patterns or defaults
+    text_off = config.get("text_off", "світло зникло")
+    text_on = config.get("text_on", "світло з'явилося")
+    
+    if re.search(rf"🔴.*{re.escape(text_off)}", text, re.IGNORECASE):
         images = config.get("red_images", [])
-    elif re.search(r"🟢.*світло з'явилося", text, re.IGNORECASE):
+    elif re.search(rf"🟢.*{re.escape(text_on)}", text, re.IGNORECASE):
         images = config.get("green_images", [])
     else:
         return
@@ -536,6 +626,9 @@ def main():
     app.add_handler(CommandHandler("list_green", list_green))
     app.add_handler(CommandHandler("remove_red", remove_red))
     app.add_handler(CommandHandler("remove_green", remove_green))
+    app.add_handler(CommandHandler("set_text_on", set_text_on))
+    app.add_handler(CommandHandler("set_text_off", set_text_off))
+    app.add_handler(CommandHandler("reset_text", reset_text))
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("transfer", transfer))
     app.add_handler(CommandHandler("remove_channel", remove_channel_cmd))
